@@ -2,92 +2,245 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14302b">
 <title>NasKob · Ubica tu parcela</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css">
 <style>
-  html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
-  body { display: flex; flex-direction: column; }
-  header { padding: 10px 14px; background: #1f3d2b; color: #fff; }
-  header h1 { margin: 0; font-size: 18px; }
-  header p { margin: 2px 0 0; font-size: 13px; opacity: .85; }
-  #map { flex: 1; min-height: 280px; }
-  #panel { padding: 10px 14px; border-top: 1px solid #ccc; background: #fafafa; max-height: 48vh; overflow: auto; }
-  #estado { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
-  #estado.aviso { color: #9a5b00; }
-  #mensaje { font-size: 14px; margin: 4px 0 8px; min-height: 18px; color: #333; }
-  details { border: 1px solid #ddd; border-radius: 8px; margin-bottom: 8px; background: #fff; }
-  summary { padding: 10px 12px; font-size: 16px; font-weight: 600; cursor: pointer; }
-  .cuerpo { padding: 4px 12px 12px; font-size: 14px; }
-  button { padding: 10px 14px; margin: 0 6px 6px 0; font-size: 15px; cursor: pointer; border-radius: 8px; border: 1px solid #888; background: #fff; }
-  button.principal { background: #1f3d2b; color: #fff; border-color: #1f3d2b; }
-  button:disabled { opacity: .45; cursor: default; }
-  input[type=text], input[type=number] { padding: 9px; font-size: 15px; box-sizing: border-box; }
-  #q { width: calc(100% - 100px); }
-  #resultados button { display: block; width: 100%; text-align: left; }
-  textarea { width: 100%; height: 110px; font-family: ui-monospace, monospace; font-size: 12px; box-sizing: border-box; }
-  small { color: #555; }
+  :root {
+    --ink: #14302b;        /* verde casi negro: texto y botones principales */
+    --ink-2: #4a625c;      /* texto secundario (contraste 6:1 sobre blanco) */
+    --line: #d5dfdb;
+    --bg: #f3f6f4;
+    --card: #ffffff;
+    --maize: #f0b323;      /* color del maíz: acción y foco */
+    --maize-ink: #2e2200;
+    --ok: #006b4f;
+    --ok-bg: #e2f3ec;
+    --warn: #8a4a00;
+    --warn-bg: #fdf0dc;
+    --route: #d55e00;      /* trazo de la parcela en el mapa (Okabe–Ito) */
+    --radius: 14px;
+    font-family: "Avenir Next", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; color: var(--ink); background: var(--bg); }
+  #map { position: absolute; inset: 0; }
+
+  /* ----- Hoja: abajo en teléfono, a la izquierda en pantalla grande ----- */
+  #hoja {
+    position: absolute; z-index: 1000; left: 0; right: 0; bottom: 0;
+    max-height: 56vh; overflow-y: auto; overscroll-behavior: contain;
+    background: var(--bg); border-radius: 22px 22px 0 0;
+    box-shadow: 0 -6px 28px rgba(20,48,43,.22);
+    padding: 8px 18px calc(18px + env(safe-area-inset-bottom));
+  }
+  #hoja::before { content: ""; display: block; width: 40px; height: 4px; border-radius: 2px; background: #b9c8c2; margin: 0 auto 10px; }
+  @media (min-width: 800px) {
+    #hoja { left: 16px; top: 16px; bottom: 16px; right: auto; width: 392px; max-height: none; border-radius: 18px; padding: 22px 20px 20px; }
+    #hoja::before { display: none; }
+  }
+
+  .marca { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: var(--ink-2); letter-spacing: .02em; }
+  .marca svg { width: 18px; height: 18px; color: var(--ink); }
+  h1 { font-size: 24px; line-height: 1.15; margin: 6px 0 4px; font-weight: 800; letter-spacing: -.01em; }
+  .sub { margin: 0 0 14px; color: var(--ink-2); font-size: 15px; line-height: 1.4; max-width: 34em; }
+  h2 { font-size: 20px; margin: 4px 0 6px; font-weight: 800; }
+
+  .volver { display: inline-flex; align-items: center; gap: 6px; background: none; border: 0; color: var(--ink-2); font-size: 15px; font-weight: 600; padding: 8px 0; margin: 0 0 2px; cursor: pointer; }
+  .volver svg { width: 18px; height: 18px; }
+
+  /* ----- Opciones grandes ----- */
+  .opcion {
+    display: flex; align-items: center; gap: 14px; width: 100%; text-align: left;
+    background: var(--card); border: 1.5px solid var(--line); border-radius: var(--radius);
+    padding: 14px; margin-bottom: 10px; cursor: pointer; font: inherit; color: inherit;
+    transition: border-color .15s, transform .15s;
+  }
+  .opcion:hover { border-color: var(--ink); }
+  .opcion:active { transform: scale(.99); }
+  .opcion .ico { flex: none; width: 46px; height: 46px; border-radius: 12px; background: var(--ink); color: #fff; display: grid; place-items: center; }
+  .opcion .ico svg { width: 24px; height: 24px; }
+  .opcion strong { display: block; font-size: 17px; margin-bottom: 2px; }
+  .opcion span { font-size: 14px; color: var(--ink-2); line-height: 1.35; }
+  .opcion.recomendada { border-color: var(--maize); box-shadow: 0 0 0 3px rgba(240,179,35,.28); }
+  .etiqueta { display: inline-block; font-size: 12px; font-weight: 700; background: var(--maize); color: var(--maize-ink); border-radius: 6px; padding: 2px 7px; margin-left: 6px; vertical-align: 2px; }
+
+  .enlace { background: none; border: 0; padding: 10px 0; font: inherit; font-size: 15px; font-weight: 600; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+
+  /* ----- Botones ----- */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 50px; padding: 0 18px; font: inherit; font-size: 16px; font-weight: 700; border-radius: 12px; border: 1.5px solid var(--ink); background: var(--card); color: var(--ink); cursor: pointer; }
+  .btn svg { width: 20px; height: 20px; }
+  .btn.principal { background: var(--ink); color: #fff; }
+  .btn.maiz { background: var(--maize); border-color: var(--maize); color: var(--maize-ink); }
+  .btn.ancho { width: 100%; }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .fila { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .fila .btn { flex: 1 1 140px; }
+
+  :focus-visible { outline: 3px solid var(--maize); outline-offset: 2px; }
+
+  /* ----- Campos ----- */
+  .campo { display: flex; gap: 8px; margin-bottom: 10px; }
+  input[type=text] { flex: 1; min-width: 0; min-height: 50px; padding: 0 14px; font: inherit; font-size: 16px; border: 1.5px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); }
+  input[type=text]:focus { border-color: var(--ink); }
+  input[type=range] { width: 100%; accent-color: var(--ink); height: 32px; }
+  label { font-size: 15px; font-weight: 600; }
+  .resultado-lista button { display: block; width: 100%; text-align: left; background: var(--card); border: 1.5px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; font: inherit; cursor: pointer; color: var(--ink); }
+  .resultado-lista strong { display: block; font-size: 16px; }
+  .resultado-lista span { font-size: 13px; color: var(--ink-2); }
+
+  /* ----- Aviso (siempre con ícono y texto) ----- */
+  #aviso { display: none; gap: 10px; align-items: flex-start; border-radius: 12px; padding: 10px 12px; margin: 0 0 12px; font-size: 15px; line-height: 1.4; background: #e9eef0; color: var(--ink); }
+  #aviso.visible { display: flex; }
+  #aviso .i { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 13px; background: var(--ink); color: #fff; margin-top: 1px; }
+  #aviso.ok { background: var(--ok-bg); color: #05382b; } #aviso.ok .i { background: var(--ok); }
+  #aviso.warn { background: var(--warn-bg); color: #4d2a00; } #aviso.warn .i { background: var(--warn); }
+
+  /* ----- Caminar ----- */
+  .contador { display: flex; align-items: baseline; gap: 8px; margin: 6px 0 12px; }
+  .contador b { font-size: 44px; line-height: 1; font-weight: 800; }
+  .contador span { color: var(--ink-2); font-size: 15px; }
+  .pasos { margin: 0 0 14px; padding-left: 20px; color: var(--ink-2); font-size: 15px; line-height: 1.5; }
+
+  /* ----- Resultado ----- */
+  .tarjeta { background: var(--card); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
+  .area { display: flex; align-items: baseline; gap: 8px; }
+  .area b { font-size: 52px; line-height: 1; font-weight: 800; letter-spacing: -.02em; }
+  .area span { font-size: 20px; font-weight: 700; color: var(--ink-2); }
+  .datos { margin: 12px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 15px; }
+  .datos dt { color: var(--ink-2); }
+  .datos dd { margin: 0; font-weight: 600; }
+  textarea { width: 100%; height: 190px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; border: 1.5px solid var(--line); border-radius: 12px; padding: 10px; background: #fff; color: var(--ink); resize: vertical; }
+  .nota { font-size: 13px; color: var(--ink-2); line-height: 1.4; margin: 10px 0 0; }
+
+  [hidden] { display: none !important; }
+  .leaflet-control-layers, .leaflet-bar { border-radius: 10px !important; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
 <body>
-<header>
-  <h1>Ubica tu parcela</h1>
-  <p>Elige la forma que te resulte más fácil. Lo que marques lo declaras tú.</p>
-</header>
 <div id="map"></div>
 
-<div id="panel">
-  <div id="estado">Aún no has marcado tu parcela.</div>
-  <div id="mensaje"></div>
+<main id="hoja" aria-live="polite">
+  <div class="marca">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21V9"/><path d="M12 13c-3 0-5-2-5-5 3 0 5 2 5 5z"/><path d="M12 10c0-3 2-5 5-5 0 3-2 5-5 5z"/><path d="M12 17c-2.5 0-4-1.5-4-4 2.5 0 4 1.5 4 4z"/></svg>
+    NasKob
+  </div>
 
-  <details open>
-    <summary>1. Buscar mi ejido o localidad</summary>
-    <div class="cuerpo">
-      <input type="text" id="q" placeholder="Ej. Villaflores, Chiapas">
-      <button id="btn-buscar" class="principal">Buscar</button>
-      <div id="resultados"></div>
-      <small>Solo te lleva a la zona en el mapa. Después marca tu parcela con la opción 2 o 3.</small>
-    </div>
-  </details>
+  <div id="aviso" role="status"><span class="i" id="aviso-i">i</span><span id="aviso-t"></span></div>
 
-  <details>
-    <summary>2. Caminar el contorno de mi parcela</summary>
-    <div class="cuerpo">
-      <p>Ve a una esquina de tu parcela y toca «Marcar esquina». Repite en cada esquina y al final toca «Cerrar parcela».</p>
-      <button id="btn-esquina" class="principal">Marcar esquina aquí</button>
-      <button id="btn-deshacer" disabled>Quitar última esquina</button>
-      <button id="btn-cerrar" disabled>Cerrar parcela</button>
-      <div id="info-esquinas"><small>Esquinas marcadas: 0 (mínimo 3)</small></div>
-    </div>
-  </details>
+  <!-- INICIO -->
+  <section id="v-inicio" class="vista">
+    <h1>Ubica tu parcela</h1>
+    <p class="sub">Elige la forma que te resulte más fácil. Lo que marques lo declaras tú; nadie más lo ve.</p>
 
-  <details>
-    <summary>3. Usar una foto tomada en mi parcela</summary>
-    <div class="cuerpo">
-      <p>Párate dentro de tu parcela y toca «Tomar foto». Se abre la cámara desde aquí. La foto no se guarda ni se envía: solo se usa el lugar donde se tomó.</p>
-      <label>Tamaño aproximado: radio de <input type="number" id="radio" value="100" min="20" max="500" style="width:80px"> metros</label>
-      <br><br>
-      <button id="btn-foto" class="principal">Tomar foto en mi parcela</button>
-      <button id="btn-galeria">Elegir una foto que ya tengo</button>
-      <input type="file" id="foto" accept="image/*" capture="environment" hidden>
-      <input type="file" id="galeria" accept="image/*" hidden>
-    </div>
-  </details>
+    <button class="opcion recomendada" data-ir="v-caminar">
+      <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-6-5.4-6-10a6 6 0 1 1 12 0c0 4.6-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg></span>
+      <span><strong>Caminar el contorno<em class="etiqueta" style="font-style:normal">Más preciso</em></strong><span>Camina por las esquinas y marca cada una con tu teléfono.</span></span>
+    </button>
 
-  <details>
-    <summary>Otras opciones y resultado</summary>
-    <div class="cuerpo">
-      <p><small>También puedes dibujar el contorno con las herramientas del mapa (esquina superior izquierda).</small></p>
-      <button id="btn-gps">Ir a mi ubicación</button>
-      <button id="btn-copiar" disabled>Copiar GeoJSON</button>
-      <button id="btn-descargar" disabled>Descargar .geojson</button>
-      <button id="btn-borrar" disabled>Borrar parcela</button>
-      <textarea id="salida" readonly placeholder="Aquí aparecerá la ubicación guardada (GeoJSON)"></textarea>
-      <small>Los datos se guardan solo en este navegador. En el sistema real la geometría se cifraría en el servidor (RNF01).</small>
+    <button class="opcion" data-ir="v-foto">
+      <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span>
+      <span><strong>Tomar una foto</strong><span>Párate en tu parcela y toma una foto. Marca el lugar aproximado.</span></span>
+    </button>
+
+    <button class="opcion" data-ir="v-buscar">
+      <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg></span>
+      <span><strong>Buscar mi ejido o localidad</strong><span>Te lleva a tu zona en el mapa para encontrar tu parcela.</span></span>
+    </button>
+
+    <button class="enlace" id="btn-dibujar">Prefiero dibujarla sobre el mapa</button>
+  </section>
+
+  <!-- BUSCAR -->
+  <section id="v-buscar" class="vista" hidden>
+    <button class="volver" data-ir="v-inicio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Volver</button>
+    <h2>Buscar mi lugar</h2>
+    <p class="sub">Escribe el nombre de tu ejido, localidad o municipio.</p>
+    <div class="campo">
+      <input type="text" id="q" placeholder="Ej. Villaflores, Chiapas" autocomplete="off" enterkeyhint="search">
+      <button class="btn principal" id="btn-buscar">Buscar</button>
     </div>
-  </details>
-</div>
+    <div id="resultados" class="resultado-lista"></div>
+  </section>
+
+  <!-- CAMINAR -->
+  <section id="v-caminar" class="vista" hidden>
+    <button class="volver" data-ir="v-inicio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Volver</button>
+    <h2>Camina el contorno</h2>
+    <ol class="pasos">
+      <li>Ve a una esquina de tu parcela.</li>
+      <li>Toca «Marcar esquina» y espera unos segundos sin moverte.</li>
+      <li>Repite en cada esquina y toca «Cerrar parcela».</li>
+    </ol>
+    <div class="contador"><b id="n-esquinas">0</b><span>esquinas marcadas · mínimo 3</span></div>
+    <button class="btn principal ancho" id="btn-esquina">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-6-5.4-6-10a6 6 0 1 1 12 0c0 4.6-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg>
+      Marcar esquina aquí
+    </button>
+    <div class="fila">
+      <button class="btn" id="btn-deshacer" disabled>Quitar la última</button>
+      <button class="btn maiz" id="btn-cerrar" disabled>Cerrar parcela</button>
+    </div>
+  </section>
+
+  <!-- FOTO -->
+  <section id="v-foto" class="vista" hidden>
+    <button class="volver" data-ir="v-inicio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Volver</button>
+    <h2>Tomar una foto</h2>
+    <p class="sub">Párate dentro de tu parcela y toma la foto. No se guarda ni se envía: solo se usa el lugar donde la tomaste.</p>
+    <label for="radio">Tamaño aproximado: radio de <output id="radio-v">100</output> m</label>
+    <input type="range" id="radio" min="20" max="500" step="10" value="100">
+    <button class="btn principal ancho" id="btn-foto" style="margin-top:8px">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+      Tomar foto en mi parcela
+    </button>
+    <button class="enlace" id="btn-galeria">Elegir una foto que ya tengo</button>
+    <input type="file" id="foto" accept="image/*" capture="environment" hidden>
+    <input type="file" id="galeria" accept="image/*" hidden>
+  </section>
+
+  <!-- DIBUJAR -->
+  <section id="v-dibujar" class="vista" hidden>
+    <h2>Dibuja tu parcela</h2>
+    <p class="sub">Toca cada esquina sobre el mapa. Para terminar, toca otra vez la primera esquina.</p>
+    <button class="btn ancho" id="btn-cancelar-dibujo">Cancelar</button>
+  </section>
+
+  <!-- RESULTADO -->
+  <section id="v-resultado" class="vista" hidden>
+    <h2>Tu parcela quedó marcada</h2>
+    <div class="tarjeta">
+      <div class="area"><b id="r-area">0</b><span>hectáreas</span></div>
+      <dl class="datos">
+        <dt>Cómo se marcó</dt><dd id="r-metodo"></dd>
+        <dt id="r-prec-t" hidden>Precisión</dt><dd id="r-prec" hidden></dd>
+        <dt>Origen</dt><dd>Declarado por ti</dd>
+      </dl>
+      <p class="nota" id="r-nota" hidden></p>
+    </div>
+    <div class="fila">
+      <button class="btn principal" id="btn-descargar">Descargar parcela</button>
+      <button class="btn" id="btn-copiar">Copiar datos</button>
+    </div>
+    <div class="fila">
+      <button class="btn" id="btn-rehacer">Volver a marcar</button>
+      <button class="btn" data-ir="v-datos">Ver datos</button>
+    </div>
+    <p class="nota">Esto es una herramienta de apoyo: revisa el contorno en el mapa y, si puedes, coméntalo con tu técnico.</p>
+  </section>
+
+  <!-- DATOS -->
+  <section id="v-datos" class="vista" hidden>
+    <button class="volver" data-ir="v-resultado"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Volver</button>
+    <h2>Datos de la parcela</h2>
+    <p class="sub">Formato GeoJSON. Es lo que se guarda y lo que se descarga.</p>
+    <textarea id="salida" readonly aria-label="Datos de la parcela en GeoJSON"></textarea>
+    <p class="nota">Se guardan solo en este navegador. En el sistema completo, el contorno se cifraría en el servidor.</p>
+  </section>
+</main>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
@@ -96,33 +249,57 @@
 <script>
 const CLAVE = 'naskob_parcela';
 const AREA_MIN_HA = 1, AREA_MAX_HA = 5;   // perfil del piloto
-const PRECISION_AVISO_M = 15;             // aviso si el GPS es más impreciso que esto
+const PRECISION_AVISO_M = 15;
 
 const $ = id => document.getElementById(id);
 const r6 = n => Math.round(n * 1e6) / 1e6;
-const msg = (t) => { $('mensaje').textContent = t; };
+const grande = () => window.innerWidth >= 800;
+
+// ---------- Navegación entre pantallas ----------
+function ir(id) {
+  document.querySelectorAll('.vista').forEach(v => v.hidden = v.id !== id);
+  $('hoja').scrollTop = 0;
+  aviso('');
+  if (id === 'v-buscar') setTimeout(() => $('q').focus(), 50);
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-ir]');
+  if (b) ir(b.dataset.ir);
+});
+
+function aviso(texto, tipo) {
+  const el = $('aviso');
+  $('aviso-t').textContent = texto || '';
+  el.className = texto ? 'visible ' + (tipo || '') : '';
+  $('aviso-i').textContent = tipo === 'ok' ? '✓' : tipo === 'warn' ? '!' : 'i';
+}
 
 // ---------- Mapa ----------
-const map = L.map('map').setView([16.23, -93.27], 12);   // Frailesca, Chiapas (candidata)
+const map = L.map('map', { zoomControl: false }).setView([16.23, -93.27], 12); // Frailesca, Chiapas
+L.control.zoom({ position: 'topright' }).addTo(map);
 const satelite = L.tileLayer(
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
   { maxZoom: 19, attribution: 'Imágenes © Esri' });
 const calles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
   { maxZoom: 19, attribution: '© OpenStreetMap' });
 satelite.addTo(map);
-L.control.layers({ 'Satélite': satelite, 'Calles': calles }).addTo(map);
+L.control.layers({ 'Satélite': satelite, 'Calles': calles }, null, { position: 'topright' }).addTo(map);
 
-const capa = new L.FeatureGroup().addTo(map);       // la parcela final
-const capaCamino = new L.FeatureGroup().addTo(map); // esquinas mientras se camina
+const capa = new L.FeatureGroup().addTo(map);        // parcela final
+const capaCamino = new L.FeatureGroup().addTo(map);  // esquinas mientras se camina
 
-map.addControl(new L.Control.Draw({
-  draw: {
-    polygon: { allowIntersection: false, showArea: false },
-    circle: { shapeOptions: { color: '#d55e00' } },
-    rectangle: false, polyline: false, marker: false, circlemarker: false
-  },
-  edit: { featureGroup: capa }
-}));
+// El mapa se ve completo aunque la hoja tape una parte
+function encuadrar(bounds) {
+  const h = window.innerHeight;
+  map.fitBounds(bounds, grande()
+    ? { paddingTopLeft: [432, 24], paddingBottomRight: [24, 24], maxZoom: 18 }
+    : { paddingTopLeft: [24, 24], paddingBottomRight: [24, Math.round(h * 0.56) + 16], maxZoom: 18 });
+}
+function centrar(lat, lng, zoom) {
+  const p = map.project([lat, lng], zoom);
+  const off = grande() ? L.point(-208, 0) : L.point(0, window.innerHeight * 0.27);
+  map.setView(map.unproject(p.add(off), zoom), zoom);
+}
 
 // ---------- Parcela final ----------
 function aFeature(layer) {
@@ -150,23 +327,41 @@ function aFeature(layer) {
   return { type: 'Feature', geometry, properties: props };
 }
 
+const METODOS = {
+  gps_caminando: 'Caminando el contorno',
+  foto_exif: 'Foto (lugar aproximado)',
+  foto_gps_navegador: 'Foto (lugar aproximado)',
+  dibujo: 'Dibujada en el mapa'
+};
+
 function mostrar(feature) {
   const p = feature.properties, ha = p.area_ha;
   const texto = JSON.stringify(feature, null, 2);
   $('salida').value = texto;
   console.log('Parcela marcada:\n' + texto);
+
+  $('r-area').textContent = ha;
+  $('r-metodo').textContent = METODOS[p.metodo] || 'Dibujada en el mapa';
+  const conPrec = p.precision_gps_m != null;
+  $('r-prec-t').hidden = !conPrec; $('r-prec').hidden = !conPrec;
+  if (conPrec) $('r-prec').textContent = `error de unos ${p.precision_gps_m} m`;
+
+  const esPunto = p.tipo === 'punto_radio';
+  $('r-nota').hidden = !esPunto;
+  if (esPunto) $('r-nota').textContent = 'Es un punto aproximado, no el contorno. Para más precisión, camina el contorno.';
+
+  ir('v-resultado');
   const fuera = ha < AREA_MIN_HA || ha > AREA_MAX_HA;
-  $('estado').textContent = `Área: ${ha} ha` +
-    (fuera ? ` · fuera del rango de ${AREA_MIN_HA} a ${AREA_MAX_HA} ha; revisa el contorno` : '');
-  $('estado').className = fuera ? 'aviso' : '';
-  ['btn-copiar', 'btn-descargar', 'btn-borrar'].forEach(i => $(i).disabled = false);
+  if (fuera) aviso(`El área está fuera de ${AREA_MIN_HA} a ${AREA_MAX_HA} ha. Revisa que el contorno sea correcto.`, 'warn');
+  else aviso('El tamaño es el esperado para una parcela de este proyecto.', 'ok');
+
   try { localStorage.setItem(CLAVE, texto); } catch (e) {}
 }
 
 function fijar(layer) {
   capa.clearLayers();
   capa.addLayer(layer);
-  map.fitBounds(layer.getBounds(), { maxZoom: 18 });
+  encuadrar(layer.getBounds());
   mostrar(aFeature(layer));
 }
 
@@ -174,79 +369,74 @@ function limpiar() {
   capa.clearLayers();
   reiniciarCamino();
   $('salida').value = '';
-  $('estado').textContent = 'Aún no has marcado tu parcela.';
-  $('estado').className = '';
-  msg('');
-  ['btn-copiar', 'btn-descargar', 'btn-borrar'].forEach(i => $(i).disabled = true);
   try { localStorage.removeItem(CLAVE); } catch (e) {}
+  ir('v-inicio');
 }
+$('btn-rehacer').onclick = limpiar;
 
-// Dibujo manual (opción de respaldo)
+// ---------- Dibujar sobre el mapa (opción de respaldo) ----------
+let dibujante = null;
+$('btn-dibujar').onclick = () => {
+  dibujante = new L.Draw.Polygon(map, { allowIntersection: false, showArea: false, shapeOptions: { color: '#d55e00' } });
+  dibujante.enable();
+  ir('v-dibujar');
+};
+$('btn-cancelar-dibujo').onclick = () => { if (dibujante) dibujante.disable(); ir('v-inicio'); };
 map.on(L.Draw.Event.CREATED, e => { e.layer._metodo = 'dibujo'; fijar(e.layer); });
-map.on(L.Draw.Event.EDITED, () => {
-  const l = capa.getLayers()[0];
-  if (l) { l._metodo = (l._metodo || 'dibujo') + '_editado'; mostrar(aFeature(l)); }
-});
-map.on(L.Draw.Event.DELETED, () => { if (!capa.getLayers().length) limpiar(); });
 
-// ---------- Opción 1: buscar ejido o localidad ----------
+// ---------- Buscar ejido o localidad ----------
 async function buscar() {
   const q = $('q').value.trim();
-  if (!q) return msg('Escribe el nombre de tu ejido, localidad o municipio.');
-  msg('Buscando…');
+  if (!q) return aviso('Escribe el nombre de tu ejido, localidad o municipio.', 'warn');
+  aviso('Buscando…');
   $('resultados').innerHTML = '';
   try {
     const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=mx&accept-language=es&q=' +
       encodeURIComponent(q);
-    const res = await fetch(url);
-    const datos = await res.json();
-    if (!datos.length) return msg('No encontré ese lugar. Prueba con el nombre del municipio.');
-    msg('Toca tu lugar en la lista:');
+    const datos = await (await fetch(url)).json();
+    if (!datos.length) return aviso('No encontré ese lugar. Prueba con el nombre del municipio.', 'warn');
+    aviso('Toca tu lugar en la lista.');
     datos.forEach(d => {
+      const partes = d.display_name.split(', ');
       const b = document.createElement('button');
-      b.textContent = d.display_name;
+      const t = document.createElement('strong'); t.textContent = partes[0];
+      const s = document.createElement('span'); s.textContent = partes.slice(1, 4).join(', ');
+      b.append(t, s);
       b.onclick = () => {
-        map.setView([parseFloat(d.lat), parseFloat(d.lon)], 15);
-        msg('Listo. Ahora camina el contorno (opción 2) o usa una foto (opción 3).');
+        centrar(parseFloat(d.lat), parseFloat(d.lon), 15);
         $('resultados').innerHTML = '';
+        ir('v-inicio');
+        aviso('Listo, el mapa está en tu zona. Ahora camina el contorno o toma una foto.', 'ok');
       };
       $('resultados').appendChild(b);
     });
   } catch (e) {
-    msg('No se pudo buscar. Revisa tu conexión a internet.');
+    aviso('No se pudo buscar. Revisa tu conexión a internet.', 'warn');
   }
 }
 $('btn-buscar').onclick = buscar;
 $('q').addEventListener('keydown', e => { if (e.key === 'Enter') buscar(); });
 
-// ---------- Opción 2: caminar el contorno ----------
+// ---------- Caminar el contorno ----------
 let esquinas = [];   // {lat, lng, acc}
-let lineaCamino = null;
 
 function dibujarCamino() {
   capaCamino.clearLayers();
   const pts = esquinas.map(c => [c.lat, c.lng]);
   esquinas.forEach((c, i) => {
-    L.circleMarker([c.lat, c.lng], { radius: 7, color: '#d55e00', fillOpacity: .9 })
+    L.circleMarker([c.lat, c.lng], { radius: 8, color: '#fff', weight: 2, fillColor: '#d55e00', fillOpacity: 1 })
       .bindTooltip(String(i + 1), { permanent: true, direction: 'top' }).addTo(capaCamino);
   });
   if (pts.length > 1) L.polyline(pts, { color: '#d55e00', dashArray: '6 6' }).addTo(capaCamino);
-  $('info-esquinas').innerHTML = `<small>Esquinas marcadas: ${esquinas.length} (mínimo 3)</small>`;
+  $('n-esquinas').textContent = esquinas.length;
   $('btn-deshacer').disabled = esquinas.length === 0;
   $('btn-cerrar').disabled = esquinas.length < 3;
 }
-
-function reiniciarCamino() {
-  esquinas = [];
-  capaCamino.clearLayers();
-  $('info-esquinas').innerHTML = '<small>Esquinas marcadas: 0 (mínimo 3)</small>';
-  $('btn-deshacer').disabled = true;
-  $('btn-cerrar').disabled = true;
-}
+function reiniciarCamino() { esquinas = []; dibujarCamino(); }
 
 $('btn-esquina').onclick = () => {
-  if (!navigator.geolocation) return msg('Tu navegador no permite usar la ubicación.');
-  msg('Obteniendo tu ubicación… espera unos segundos sin moverte.');
+  if (!navigator.geolocation) return aviso('Tu navegador no permite usar la ubicación.', 'warn');
+  aviso('Obteniendo tu ubicación… espera unos segundos sin moverte.');
   $('btn-esquina').disabled = true;
   navigator.geolocation.getCurrentPosition(
     p => {
@@ -254,42 +444,41 @@ $('btn-esquina').onclick = () => {
       const acc = p.coords.accuracy;
       esquinas.push({ lat: p.coords.latitude, lng: p.coords.longitude, acc });
       dibujarCamino();
-      map.setView([p.coords.latitude, p.coords.longitude], 18);
-      msg(acc > PRECISION_AVISO_M
-        ? `Esquina ${esquinas.length} marcada, pero el GPS tiene un error de unos ${Math.round(acc)} m. Espera a cielo abierto y vuelve a intentar si puedes.`
-        : `Esquina ${esquinas.length} marcada (error de unos ${Math.round(acc)} m). Camina a la siguiente.`);
+      centrar(p.coords.latitude, p.coords.longitude, 18);
+      if (acc > PRECISION_AVISO_M) {
+        aviso(`Esquina ${esquinas.length} marcada, pero el GPS tiene un error de unos ${Math.round(acc)} m. Si puedes, espera a cielo abierto y marca otra vez.`, 'warn');
+      } else {
+        aviso(`Esquina ${esquinas.length} marcada (error de unos ${Math.round(acc)} m). Camina a la siguiente.`, 'ok');
+      }
     },
     err => {
       $('btn-esquina').disabled = false;
-      msg(err.code === 1
+      aviso(err.code === 1
         ? 'Necesito permiso para usar tu ubicación. Actívalo en el navegador.'
-        : 'No se pudo obtener la ubicación. Sal a un lugar abierto e intenta otra vez.');
+        : 'No se pudo obtener la ubicación. Sal a un lugar abierto e intenta otra vez.', 'warn');
     },
     { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
   );
 };
 
-$('btn-deshacer').onclick = () => { esquinas.pop(); dibujarCamino(); msg('Se quitó la última esquina.'); };
+$('btn-deshacer').onclick = () => { esquinas.pop(); dibujarCamino(); aviso('Se quitó la última esquina.'); };
 
 $('btn-cerrar').onclick = () => {
   if (esquinas.length < 3) return;
   const ring = esquinas.map(c => [c.lng, c.lat]); ring.push(ring[0]);
   if (turf.kinks(turf.polygon([ring])).features.length) {
-    return msg('Las líneas se cruzan. Quita la última esquina o marca las esquinas en orden, siguiendo el borde.');
+    return aviso('Las líneas se cruzan. Quita la última esquina o marca las esquinas en orden, siguiendo el borde.', 'warn');
   }
-  const layer = L.polygon(esquinas.map(c => [c.lat, c.lng]), { color: '#3388ff' });
+  const layer = L.polygon(esquinas.map(c => [c.lat, c.lng]), { color: '#d55e00', weight: 3, fillOpacity: .18 });
   layer._metodo = 'gps_caminando';
   layer._precision_m = Math.max(...esquinas.map(c => c.acc));
-  capaCamino.clearLayers();
-  esquinas = [];
-  $('btn-deshacer').disabled = true;
-  $('btn-cerrar').disabled = true;
-  $('info-esquinas').innerHTML = '<small>Esquinas marcadas: 0 (mínimo 3)</small>';
+  reiniciarCamino();
   fijar(layer);
-  msg('Parcela cerrada. Revisa el contorno en el mapa.');
 };
 
-// ---------- Opción 3: foto con ubicación (EXIF) ----------
+// ---------- Foto ----------
+$('radio').oninput = () => { $('radio-v').textContent = $('radio').value; };
+
 let posicionAlTocar = null;   // ubicación pedida justo al abrir la cámara
 function pedirPosicion() {
   posicionAlTocar = new Promise(res => {
@@ -308,7 +497,7 @@ $('galeria').onchange = procesarFoto;
 async function procesarFoto(e) {
   const archivo = e.target.files[0];
   if (!archivo) return;
-  msg('Leyendo la ubicación de la foto…');
+  aviso('Leyendo el lugar de la foto…');
   try {
     // 1) ubicación guardada dentro de la foto (solo latitud y longitud; la foto no se guarda)
     let gps = await exifr.gps(archivo);
@@ -319,52 +508,47 @@ async function procesarFoto(e) {
       origen = 'foto_gps_navegador';
     }
     if (!gps || gps.latitude == null) {
-      return msg('No pudimos saber dónde se tomó la foto. Activa la ubicación del teléfono y vuelve a tomarla dentro de tu parcela. Las fotos enviadas por WhatsApp pierden la ubicación.');
+      aviso('No pudimos saber dónde se tomó la foto. Activa la ubicación del teléfono y vuelve a tomarla dentro de tu parcela. Las fotos enviadas por WhatsApp pierden la ubicación.', 'warn');
+    } else {
+      const radio = Math.min(500, Math.max(20, Number($('radio').value) || 100));
+      const layer = L.circle([gps.latitude, gps.longitude], { radius: radio, color: '#d55e00', weight: 3, fillOpacity: .18 });
+      layer._metodo = origen;
+      if (gps.acc) layer._precision_m = gps.acc;
+      fijar(layer);
     }
-    const radio = Math.min(500, Math.max(20, Number($('radio').value) || 100));
-    const layer = L.circle([gps.latitude, gps.longitude], { radius: radio, color: '#d55e00' });
-    layer._metodo = origen;
-    if (gps.acc) layer._precision_m = gps.acc;
-    fijar(layer);
-    msg('Ubicamos el lugar de la foto. Es un punto aproximado, no el contorno: ajusta el radio o camina el contorno para más precisión.');
   } catch (err) {
-    msg('No se pudo leer la foto. Prueba con otra.');
+    aviso('No se pudo leer la foto. Prueba con otra.', 'warn');
   }
   e.target.value = '';
-};
+}
 
-// ---------- Utilidades ----------
-$('btn-borrar').onclick = limpiar;
-$('btn-copiar').onclick = async () => {
-  await navigator.clipboard.writeText($('salida').value);
-  msg('GeoJSON copiado.');
-};
+// ---------- Descargar y copiar ----------
 $('btn-descargar').onclick = () => {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([$('salida').value], { type: 'application/geo+json' }));
   a.download = 'parcela.geojson';
   a.click();
+  aviso('Se descargó parcela.geojson.', 'ok');
 };
-$('btn-gps').onclick = () => {
-  if (!navigator.geolocation) return msg('Tu navegador no permite usar la ubicación.');
-  navigator.geolocation.getCurrentPosition(
-    p => map.setView([p.coords.latitude, p.coords.longitude], 17),
-    () => msg('No se pudo obtener tu ubicación.'));
+$('btn-copiar').onclick = async () => {
+  try { await navigator.clipboard.writeText($('salida').value); aviso('Datos copiados.', 'ok'); }
+  catch (e) { aviso('No se pudo copiar. Usa «Ver datos» y copia el texto.', 'warn'); }
 };
 
-// Recuperar parcela guardada
+// ---------- Recuperar parcela guardada ----------
 try {
   const g0 = JSON.parse(localStorage.getItem(CLAVE) || 'null');
   if (g0) {
     const g = g0.geometry, p = g0.properties;
     const layer = g.type === 'Point'
-      ? L.circle([g.coordinates[1], g.coordinates[0]], { radius: p.radio_m, color: '#d55e00' })
-      : L.polygon(g.coordinates[0].slice(0, -1).map(c => [c[1], c[0]]));
+      ? L.circle([g.coordinates[1], g.coordinates[0]], { radius: p.radio_m, color: '#d55e00', weight: 3, fillOpacity: .18 })
+      : L.polygon(g.coordinates[0].slice(0, -1).map(c => [c[1], c[0]]), { color: '#d55e00', weight: 3, fillOpacity: .18 });
     layer._metodo = p.metodo;
     if (p.precision_gps_m != null) layer._precision_m = p.precision_gps_m;
     capa.addLayer(layer);
-    map.fitBounds(layer.getBounds());
+    encuadrar(layer.getBounds());
     mostrar(g0);
+    aviso('Esta es la parcela que marcaste la última vez.');
   }
 } catch (e) {}
 </script>
