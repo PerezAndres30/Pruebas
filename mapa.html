@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NasKob · Ubica tu parcela</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css">
+<style>
+  html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; }
+  header { padding: 10px 14px; background: #1f3d2b; color: #fff; }
+  header h1 { margin: 0; font-size: 18px; }
+  header p { margin: 2px 0 0; font-size: 13px; opacity: .85; }
+  #map { flex: 1; min-height: 280px; }
+  #panel { padding: 10px 14px; border-top: 1px solid #ccc; background: #fafafa; max-height: 48vh; overflow: auto; }
+  #estado { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+  #estado.aviso { color: #9a5b00; }
+  #mensaje { font-size: 14px; margin: 4px 0 8px; min-height: 18px; color: #333; }
+  details { border: 1px solid #ddd; border-radius: 8px; margin-bottom: 8px; background: #fff; }
+  summary { padding: 10px 12px; font-size: 16px; font-weight: 600; cursor: pointer; }
+  .cuerpo { padding: 4px 12px 12px; font-size: 14px; }
+  button { padding: 10px 14px; margin: 0 6px 6px 0; font-size: 15px; cursor: pointer; border-radius: 8px; border: 1px solid #888; background: #fff; }
+  button.principal { background: #1f3d2b; color: #fff; border-color: #1f3d2b; }
+  button:disabled { opacity: .45; cursor: default; }
+  input[type=text], input[type=number] { padding: 9px; font-size: 15px; box-sizing: border-box; }
+  #q { width: calc(100% - 100px); }
+  #resultados button { display: block; width: 100%; text-align: left; }
+  textarea { width: 100%; height: 110px; font-family: ui-monospace, monospace; font-size: 12px; box-sizing: border-box; }
+  small { color: #555; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Ubica tu parcela</h1>
+  <p>Elige la forma que te resulte más fácil. Lo que marques lo declaras tú.</p>
+</header>
+<div id="map"></div>
+
+<div id="panel">
+  <div id="estado">Aún no has marcado tu parcela.</div>
+  <div id="mensaje"></div>
+
+  <details open>
+    <summary>1. Buscar mi ejido o localidad</summary>
+    <div class="cuerpo">
+      <input type="text" id="q" placeholder="Ej. Villaflores, Chiapas">
+      <button id="btn-buscar" class="principal">Buscar</button>
+      <div id="resultados"></div>
+      <small>Solo te lleva a la zona en el mapa. Después marca tu parcela con la opción 2 o 3.</small>
+    </div>
+  </details>
+
+  <details>
+    <summary>2. Caminar el contorno de mi parcela</summary>
+    <div class="cuerpo">
+      <p>Ve a una esquina de tu parcela y toca «Marcar esquina». Repite en cada esquina y al final toca «Cerrar parcela».</p>
+      <button id="btn-esquina" class="principal">Marcar esquina aquí</button>
+      <button id="btn-deshacer" disabled>Quitar última esquina</button>
+      <button id="btn-cerrar" disabled>Cerrar parcela</button>
+      <div id="info-esquinas"><small>Esquinas marcadas: 0 (mínimo 3)</small></div>
+    </div>
+  </details>
+
+  <details>
+    <summary>3. Usar una foto tomada en mi parcela</summary>
+    <div class="cuerpo">
+      <p>Párate dentro de tu parcela y toca «Tomar foto». Se abre la cámara desde aquí. La foto no se guarda ni se envía: solo se usa el lugar donde se tomó.</p>
+      <label>Tamaño aproximado: radio de <input type="number" id="radio" value="100" min="20" max="500" style="width:80px"> metros</label>
+      <br><br>
+      <button id="btn-foto" class="principal">Tomar foto en mi parcela</button>
+      <button id="btn-galeria">Elegir una foto que ya tengo</button>
+      <input type="file" id="foto" accept="image/*" capture="environment" hidden>
+      <input type="file" id="galeria" accept="image/*" hidden>
+    </div>
+  </details>
+
+  <details>
+    <summary>Otras opciones y resultado</summary>
+    <div class="cuerpo">
+      <p><small>También puedes dibujar el contorno con las herramientas del mapa (esquina superior izquierda).</small></p>
+      <button id="btn-gps">Ir a mi ubicación</button>
+      <button id="btn-copiar" disabled>Copiar GeoJSON</button>
+      <button id="btn-descargar" disabled>Descargar .geojson</button>
+      <button id="btn-borrar" disabled>Borrar parcela</button>
+      <textarea id="salida" readonly placeholder="Aquí aparecerá la ubicación guardada (GeoJSON)"></textarea>
+      <small>Los datos se guardan solo en este navegador. En el sistema real la geometría se cifraría en el servidor (RNF01).</small>
+    </div>
+  </details>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+<script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+<script src="https://unpkg.com/exifr@7.1.3/dist/lite.umd.js"></script>
+<script>
+const CLAVE = 'naskob_parcela';
+const AREA_MIN_HA = 1, AREA_MAX_HA = 5;   // perfil del piloto
+const PRECISION_AVISO_M = 15;             // aviso si el GPS es más impreciso que esto
+
+const $ = id => document.getElementById(id);
+const r6 = n => Math.round(n * 1e6) / 1e6;
+const msg = (t) => { $('mensaje').textContent = t; };
+
+// ---------- Mapa ----------
+const map = L.map('map').setView([16.23, -93.27], 12);   // Frailesca, Chiapas (candidata)
+const satelite = L.tileLayer(
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  { maxZoom: 19, attribution: 'Imágenes © Esri' });
+const calles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  { maxZoom: 19, attribution: '© OpenStreetMap' });
+satelite.addTo(map);
+L.control.layers({ 'Satélite': satelite, 'Calles': calles }).addTo(map);
+
+const capa = new L.FeatureGroup().addTo(map);       // la parcela final
+const capaCamino = new L.FeatureGroup().addTo(map); // esquinas mientras se camina
+
+map.addControl(new L.Control.Draw({
+  draw: {
+    polygon: { allowIntersection: false, showArea: false },
+    circle: { shapeOptions: { color: '#d55e00' } },
+    rectangle: false, polyline: false, marker: false, circlemarker: false
+  },
+  edit: { featureGroup: capa }
+}));
+
+// ---------- Parcela final ----------
+function aFeature(layer) {
+  const props = {
+    crs: 'EPSG:4326',
+    creada_utc: new Date().toISOString(),
+    origen: 'declarado',
+    metodo: layer._metodo || 'dibujo'
+  };
+  if (layer._precision_m != null) props.precision_gps_m = Math.round(layer._precision_m);
+  let geometry;
+  if (layer instanceof L.Circle) {
+    const c = layer.getLatLng(), r = layer.getRadius();
+    geometry = { type: 'Point', coordinates: [r6(c.lng), r6(c.lat)] };
+    props.tipo = 'punto_radio';
+    props.radio_m = Math.round(r);
+    props.area_ha = Math.round(Math.PI * r * r / 100) / 100;
+  } else {
+    const ring = layer.getLatLngs()[0].map(p => [r6(p.lng), r6(p.lat)]);
+    ring.push(ring[0]);
+    geometry = { type: 'Polygon', coordinates: [ring] };
+    props.tipo = 'poligono';
+    props.area_ha = Math.round(turf.area(turf.polygon([ring])) / 100) / 100;
+  }
+  return { type: 'Feature', geometry, properties: props };
+}
+
+function mostrar(feature) {
+  const p = feature.properties, ha = p.area_ha;
+  const texto = JSON.stringify(feature, null, 2);
+  $('salida').value = texto;
+  console.log('Parcela marcada:\n' + texto);
+  const fuera = ha < AREA_MIN_HA || ha > AREA_MAX_HA;
+  $('estado').textContent = `Área: ${ha} ha` +
+    (fuera ? ` · fuera del rango de ${AREA_MIN_HA} a ${AREA_MAX_HA} ha; revisa el contorno` : '');
+  $('estado').className = fuera ? 'aviso' : '';
+  ['btn-copiar', 'btn-descargar', 'btn-borrar'].forEach(i => $(i).disabled = false);
+  try { localStorage.setItem(CLAVE, texto); } catch (e) {}
+}
+
+function fijar(layer) {
+  capa.clearLayers();
+  capa.addLayer(layer);
+  map.fitBounds(layer.getBounds(), { maxZoom: 18 });
+  mostrar(aFeature(layer));
+}
+
+function limpiar() {
+  capa.clearLayers();
+  reiniciarCamino();
+  $('salida').value = '';
+  $('estado').textContent = 'Aún no has marcado tu parcela.';
+  $('estado').className = '';
+  msg('');
+  ['btn-copiar', 'btn-descargar', 'btn-borrar'].forEach(i => $(i).disabled = true);
+  try { localStorage.removeItem(CLAVE); } catch (e) {}
+}
+
+// Dibujo manual (opción de respaldo)
+map.on(L.Draw.Event.CREATED, e => { e.layer._metodo = 'dibujo'; fijar(e.layer); });
+map.on(L.Draw.Event.EDITED, () => {
+  const l = capa.getLayers()[0];
+  if (l) { l._metodo = (l._metodo || 'dibujo') + '_editado'; mostrar(aFeature(l)); }
+});
+map.on(L.Draw.Event.DELETED, () => { if (!capa.getLayers().length) limpiar(); });
+
+// ---------- Opción 1: buscar ejido o localidad ----------
+async function buscar() {
+  const q = $('q').value.trim();
+  if (!q) return msg('Escribe el nombre de tu ejido, localidad o municipio.');
+  msg('Buscando…');
+  $('resultados').innerHTML = '';
+  try {
+    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=mx&accept-language=es&q=' +
+      encodeURIComponent(q);
+    const res = await fetch(url);
+    const datos = await res.json();
+    if (!datos.length) return msg('No encontré ese lugar. Prueba con el nombre del municipio.');
+    msg('Toca tu lugar en la lista:');
+    datos.forEach(d => {
+      const b = document.createElement('button');
+      b.textContent = d.display_name;
+      b.onclick = () => {
+        map.setView([parseFloat(d.lat), parseFloat(d.lon)], 15);
+        msg('Listo. Ahora camina el contorno (opción 2) o usa una foto (opción 3).');
+        $('resultados').innerHTML = '';
+      };
+      $('resultados').appendChild(b);
+    });
+  } catch (e) {
+    msg('No se pudo buscar. Revisa tu conexión a internet.');
+  }
+}
+$('btn-buscar').onclick = buscar;
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') buscar(); });
+
+// ---------- Opción 2: caminar el contorno ----------
+let esquinas = [];   // {lat, lng, acc}
+let lineaCamino = null;
+
+function dibujarCamino() {
+  capaCamino.clearLayers();
+  const pts = esquinas.map(c => [c.lat, c.lng]);
+  esquinas.forEach((c, i) => {
+    L.circleMarker([c.lat, c.lng], { radius: 7, color: '#d55e00', fillOpacity: .9 })
+      .bindTooltip(String(i + 1), { permanent: true, direction: 'top' }).addTo(capaCamino);
+  });
+  if (pts.length > 1) L.polyline(pts, { color: '#d55e00', dashArray: '6 6' }).addTo(capaCamino);
+  $('info-esquinas').innerHTML = `<small>Esquinas marcadas: ${esquinas.length} (mínimo 3)</small>`;
+  $('btn-deshacer').disabled = esquinas.length === 0;
+  $('btn-cerrar').disabled = esquinas.length < 3;
+}
+
+function reiniciarCamino() {
+  esquinas = [];
+  capaCamino.clearLayers();
+  $('info-esquinas').innerHTML = '<small>Esquinas marcadas: 0 (mínimo 3)</small>';
+  $('btn-deshacer').disabled = true;
+  $('btn-cerrar').disabled = true;
+}
+
+$('btn-esquina').onclick = () => {
+  if (!navigator.geolocation) return msg('Tu navegador no permite usar la ubicación.');
+  msg('Obteniendo tu ubicación… espera unos segundos sin moverte.');
+  $('btn-esquina').disabled = true;
+  navigator.geolocation.getCurrentPosition(
+    p => {
+      $('btn-esquina').disabled = false;
+      const acc = p.coords.accuracy;
+      esquinas.push({ lat: p.coords.latitude, lng: p.coords.longitude, acc });
+      dibujarCamino();
+      map.setView([p.coords.latitude, p.coords.longitude], 18);
+      msg(acc > PRECISION_AVISO_M
+        ? `Esquina ${esquinas.length} marcada, pero el GPS tiene un error de unos ${Math.round(acc)} m. Espera a cielo abierto y vuelve a intentar si puedes.`
+        : `Esquina ${esquinas.length} marcada (error de unos ${Math.round(acc)} m). Camina a la siguiente.`);
+    },
+    err => {
+      $('btn-esquina').disabled = false;
+      msg(err.code === 1
+        ? 'Necesito permiso para usar tu ubicación. Actívalo en el navegador.'
+        : 'No se pudo obtener la ubicación. Sal a un lugar abierto e intenta otra vez.');
+    },
+    { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+  );
+};
+
+$('btn-deshacer').onclick = () => { esquinas.pop(); dibujarCamino(); msg('Se quitó la última esquina.'); };
+
+$('btn-cerrar').onclick = () => {
+  if (esquinas.length < 3) return;
+  const ring = esquinas.map(c => [c.lng, c.lat]); ring.push(ring[0]);
+  if (turf.kinks(turf.polygon([ring])).features.length) {
+    return msg('Las líneas se cruzan. Quita la última esquina o marca las esquinas en orden, siguiendo el borde.');
+  }
+  const layer = L.polygon(esquinas.map(c => [c.lat, c.lng]), { color: '#3388ff' });
+  layer._metodo = 'gps_caminando';
+  layer._precision_m = Math.max(...esquinas.map(c => c.acc));
+  capaCamino.clearLayers();
+  esquinas = [];
+  $('btn-deshacer').disabled = true;
+  $('btn-cerrar').disabled = true;
+  $('info-esquinas').innerHTML = '<small>Esquinas marcadas: 0 (mínimo 3)</small>';
+  fijar(layer);
+  msg('Parcela cerrada. Revisa el contorno en el mapa.');
+};
+
+// ---------- Opción 3: foto con ubicación (EXIF) ----------
+let posicionAlTocar = null;   // ubicación pedida justo al abrir la cámara
+function pedirPosicion() {
+  posicionAlTocar = new Promise(res => {
+    if (!navigator.geolocation) return res(null);
+    navigator.geolocation.getCurrentPosition(
+      p => res({ latitude: p.coords.latitude, longitude: p.coords.longitude, acc: p.coords.accuracy }),
+      () => res(null),
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+  });
+}
+$('btn-foto').onclick = () => { pedirPosicion(); $('foto').click(); };
+$('btn-galeria').onclick = () => { posicionAlTocar = null; $('galeria').click(); };
+$('foto').onchange = procesarFoto;
+$('galeria').onchange = procesarFoto;
+
+async function procesarFoto(e) {
+  const archivo = e.target.files[0];
+  if (!archivo) return;
+  msg('Leyendo la ubicación de la foto…');
+  try {
+    // 1) ubicación guardada dentro de la foto (solo latitud y longitud; la foto no se guarda)
+    let gps = await exifr.gps(archivo);
+    let origen = 'foto_exif';
+    // 2) si la foto no la trae, la que dio el GPS del navegador al abrir la cámara
+    if ((!gps || gps.latitude == null) && posicionAlTocar) {
+      gps = await posicionAlTocar;
+      origen = 'foto_gps_navegador';
+    }
+    if (!gps || gps.latitude == null) {
+      return msg('No pudimos saber dónde se tomó la foto. Activa la ubicación del teléfono y vuelve a tomarla dentro de tu parcela. Las fotos enviadas por WhatsApp pierden la ubicación.');
+    }
+    const radio = Math.min(500, Math.max(20, Number($('radio').value) || 100));
+    const layer = L.circle([gps.latitude, gps.longitude], { radius: radio, color: '#d55e00' });
+    layer._metodo = origen;
+    if (gps.acc) layer._precision_m = gps.acc;
+    fijar(layer);
+    msg('Ubicamos el lugar de la foto. Es un punto aproximado, no el contorno: ajusta el radio o camina el contorno para más precisión.');
+  } catch (err) {
+    msg('No se pudo leer la foto. Prueba con otra.');
+  }
+  e.target.value = '';
+};
+
+// ---------- Utilidades ----------
+$('btn-borrar').onclick = limpiar;
+$('btn-copiar').onclick = async () => {
+  await navigator.clipboard.writeText($('salida').value);
+  msg('GeoJSON copiado.');
+};
+$('btn-descargar').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([$('salida').value], { type: 'application/geo+json' }));
+  a.download = 'parcela.geojson';
+  a.click();
+};
+$('btn-gps').onclick = () => {
+  if (!navigator.geolocation) return msg('Tu navegador no permite usar la ubicación.');
+  navigator.geolocation.getCurrentPosition(
+    p => map.setView([p.coords.latitude, p.coords.longitude], 17),
+    () => msg('No se pudo obtener tu ubicación.'));
+};
+
+// Recuperar parcela guardada
+try {
+  const g0 = JSON.parse(localStorage.getItem(CLAVE) || 'null');
+  if (g0) {
+    const g = g0.geometry, p = g0.properties;
+    const layer = g.type === 'Point'
+      ? L.circle([g.coordinates[1], g.coordinates[0]], { radius: p.radio_m, color: '#d55e00' })
+      : L.polygon(g.coordinates[0].slice(0, -1).map(c => [c[1], c[0]]));
+    layer._metodo = p.metodo;
+    if (p.precision_gps_m != null) layer._precision_m = p.precision_gps_m;
+    capa.addLayer(layer);
+    map.fitBounds(layer.getBounds());
+    mostrar(g0);
+  }
+} catch (e) {}
+</script>
+</body>
+</html>
